@@ -7,6 +7,9 @@ extends CharacterBody2D
 @export var deceleration: float = 800.0
 @export var jump_velocity: float = -190.0
 
+@export var fly_duration: float = 0.5      # 最大飞行时间（秒）
+@export var fly_cooldown: float = 5.0      # 飞行冷却时间（秒）
+
 @export var dash_speed: float = 260.0     # 冲刺速度
 @export var dash_time: float = 0.15       # 持续时间（秒）
 @export var dash_cooldown: float = 0.6    # 冷却（秒）
@@ -31,6 +34,8 @@ var dash_cd := 0.0
 
 # 飞行参数
 var flying : bool = false
+var fly_timer: float = 0.0                 # 当前剩余飞行时间
+var fly_cd: float = 0.0                    # 当前剩余冷却时间
 var last_space_press_time := -1000
 
 func _ready() -> void:
@@ -49,11 +54,15 @@ func add_death() -> void:
 func _physics_process(delta: float) -> void:
 	dash_cd = maxf(dash_cd - delta, 0.0)
 	
+	if fly_cd > 0.0:
+		fly_cd = maxf(fly_cd - delta, 0.0)
+	
 	# 爬梯子检测
 	climbing = false
 	if !flying and is_on_ladder() and Input.get_axis("squat", "jump") != 0.0:
 		climbing = true
-
+	
+	# 飞行计时与冷却处理
 	if climbing:
 		handle_ladder_movement()
 	
@@ -64,13 +73,28 @@ func _physics_process(delta: float) -> void:
 		if dash_timer <= 0.0:
 			dashing = false
 			velocity.x *= 0.4
-	else:
-		# 飞行检测
-		if !flying:
+			
+	elif flying:
+		# 飞行中：先处理飞行倒计时
+		fly_timer -= delta
+		if fly_timer <= 0.0:
+			# 飞行时间结束，进入冷却
+			flying = false
+			fly_cd = fly_cooldown
+			velocity.y *= 0.5  # 缓和下落速度
+			# 本帧立即应用重力和水平移动，避免突然悬空
 			apply_gravity(delta)
 			handle_jump()
+			handle_horizontal_movement(delta)
 		else:
+			# 正常飞行中：处理飞行移动
 			handle_vertical_movement(delta)
+			handle_horizontal_movement(delta)
+			
+	else:
+		# 普通状态（不飞、不冲刺、不爬梯）
+		apply_gravity(delta)
+		handle_jump()
 		handle_horizontal_movement(delta)
 		
 	update_sprite_direction()
@@ -140,8 +164,14 @@ func handle_space_pressed() -> void:
 	var elapsed_time := current_time - last_space_press_time
 
 	if elapsed_time <= double_press_interval * 1000.0:
-		flying = not flying
-		last_space_press_time = -1000
+		# 双击触发：只有不在飞行且冷却结束时才能起飞
+		if not flying and fly_cd <= 0.0:
+			flying = true
+			fly_timer = fly_duration
+			last_space_press_time = -1000  # 重置，防止连续触发
+		else:
+			# 冷却中或正在飞行，双击无效（可以在这里加音效或UI提示）
+			print("飞行冷却中，剩余: ", fly_cd)
 	else:
 		last_space_press_time = current_time
 		
